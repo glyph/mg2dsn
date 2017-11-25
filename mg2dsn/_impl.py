@@ -101,6 +101,8 @@ def getAllEvents(domain, secret):
                         print("    not clearing (suppression) bounce; delta:",
                               delta, 'reason:', item['reason'])
                 else:
+                    # drain the response
+                    treq.content(bounced)
                     print("    no suppression; not sending bounce.")
         pageURL = thisPage['paging']['next']
 
@@ -183,7 +185,7 @@ def writeone(secret, blob, domain, counter=itertools.count()):
     msg.attach(statthing)
     msg.attach(original)
     msg.attach(MIMEText(
-        "---\n\noriginal mailgun delivery status failure follows:\n\n{}\n\n"
+        "\n---\n\noriginal mailgun delivery status failure follows:\n\n{}\n\n"
         .format(jsonified))
     )
 
