@@ -180,13 +180,16 @@ def writeone(secret, blob, domain, counter=itertools.count()):
                    recipient=blob['envelope']['targets'],
                    subject=blob['message']['headers'].get('subject',
                                                           '(no subject)'),
-               ))
+               )),
+        "plain", "utf-8"
     ))
     msg.attach(statthing)
     msg.attach(original)
-    msg.attach(MIMEText(
-        "\n---\n\noriginal mailgun delivery status failure follows:\n\n{}\n\n"
-        .format(jsonified))
+    msg.attach(
+        MIMEText(
+            "\n---\n\noriginal mailgun delivery status failure follows:\n\n{}\n\n"
+            .format(jsonified), "plain", "utf-8"
+        ),
     )
 
     response = yield treq.post(
