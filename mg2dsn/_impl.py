@@ -201,7 +201,7 @@ def writeone(secret, blob, domain, counter=itertools.count()):
             "to": to_address,
         },
         files={
-            "message": ("message", BytesIO(msg.as_bytes())),
+            "message": ("message", BytesIO(msg.as_string().encode("utf-8"))),
         }
     )
     print("bounce sent:", response.code)
