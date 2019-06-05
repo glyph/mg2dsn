@@ -87,8 +87,11 @@ def getAllEvents(domain, secret):
                                     "message-id": item['message']['headers']['message-id'],
                                 }))
                         ))['items'][-1]
-                        item['storage'] = original['storage']
-                        item['envelope'] = original['envelope']
+
+                        if 'storage' in original:
+                            item['storage'] = original['storage']
+                            item['envelope'] = original['envelope']
+
                     yield writeone(secret, item, domain)
                     delta = abs(
                         (bounced_at - suppression_created).total_seconds()
@@ -110,7 +113,14 @@ def getAllEvents(domain, secret):
 @inlineCallbacks
 def writeone(secret, blob, domain, counter=itertools.count()):
     msg = MIMEMultipart("report", **{"report-type": "delivery-status"})
-    to_address = blob['envelope']['sender']
+
+    if 'envelope' in blob:
+        to_address = blob['envelope']['sender']
+        targets = blob['envelope']['targets']
+    else:
+        to_address = blob['message']['headers']['from']
+        targets = blob['message']['headers']['to']
+
     msg['to'] = to_address
     msg['from'] = '"Bounce Generator" <bounce-generator@{domain}>'.format(
         domain=domain
@@ -123,23 +133,39 @@ def writeone(secret, blob, domain, counter=itertools.count()):
     jsonified = json.dumps(blob, indent=2)
     statthing = MIMEBase("message", "delivery-status")
 
-    storurl = blob['storage']['url']
-    apiresponse = yield treq.get(storurl, auth=("api", secret),
-                                 headers={"accept": ["message/rfc2822"]})
-    msgobj = yield treq.json_content(apiresponse)
-    if apiresponse.code == 200:
-        original_bytes = msgobj['body-mime']
-    else:
-        original_bytes = dedent(
-            """
-            From: no-user@no-host.invalid
-            Subject: original message deleted
-            Content-Type: text/plain
+    original_bytes = dedent(
+        """
+        From: no-user@no-host.invalid
+        Subject: original message deleted
+        Content-Type: text/plain
 
-            Sorry, the mail administrator didn't run the script soon enough
-            and the original message got garbage-collected in the meanwhile.
-            """
-        ).strip()
+        Sorry, the mail administrator didn't run the script soon enough
+        and the original message got garbage-collected in the meanwhile.
+        """
+    ).strip()
+
+    {
+        'severity': 'permanent', 'tags': [], 'timestamp': 1559455576.945882,
+        'delivery-status': {
+            'message': "smtp; 550-5.1.1 The email account that you tried to reach does not exist. Please try 550-5.1.1 double-checking the recipient's email address for typos or 550-5.1.1 unnecessary spaces. Learn more at 550 5.1.1  https://support.google.com/mail/?p=NoSuchUser q57si464420qtq.5 - gsmtp", 'code': 550, 'description': ''},
+        'log-level': 'error', 'id': '1zh8moITS6KeKogPCxWO7Q', 'campaigns': [], 'reason': 'bounce', 'user-variables': {},
+        'flags': {'is-delayed-bounce': True},
+        'message': {
+            'headers': {
+                'to': 'twisted-python@twistedmatrix.com',
+                'message-id': '5cf36753.1c69fb81.b1fbf.2a0aSMTPIN_ADDED_BROKEN@mx.google.com',
+                'from': 'trac@twistedmatrix.com',
+                'subject': '[Twisted-Python] Weekly Bug Summary'
+            }, 'attachments': [], 'size': 11223},
+        'recipient': 'george@thecoalition.com', 'event': 'failed'
+    }
+
+    if 'storage' in blob:
+        apiresponse = yield treq.get(blob['storage']['url'], auth=("api", secret),
+                                     headers={"accept": ["message/rfc2822"]})
+        msgobj = yield treq.json_content(apiresponse)
+        if apiresponse.code == 200:
+            original_bytes = msgobj['body-mime']
 
     original = message_from_string(original_bytes)
 
@@ -151,8 +177,8 @@ def writeone(secret, blob, domain, counter=itertools.count()):
 
     inner2 = Message()
 
-    inner2['Original-Recipient'] = 'rfc822;' + blob['envelope']['targets']
-    inner2['Final-Recipient'] = 'rfc822;' + blob['envelope']['targets']
+    inner2['Original-Recipient'] = 'rfc822;' + targets
+    inner2['Final-Recipient'] = 'rfc822;' + targets
     inner2['Action'] = 'failed'
     inner2['Status'] = '5.1.0 (Remote SMTP server has rejected address)'
     inner2['Remote-MTA'] = 'dns;' + blob['delivery-status'].get(
@@ -177,9 +203,10 @@ def writeone(secret, blob, domain, counter=itertools.count()):
                """.format(
                    domain=domain,
                    sender=to_address,
-                   recipient=blob['envelope']['targets'],
-                   subject=blob['message']['headers'].get('subject',
-                                                          '(no subject)'),
+                   recipient=targets,
+                   subject=blob['message']['headers'].get(
+                       'subject', '(no subject)'
+                   ),
                )),
         "plain", "utf-8"
     ))
