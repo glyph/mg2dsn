@@ -79,14 +79,19 @@ def getAllEvents(domain, secret):
                         bouncedata.get('created_at')
                     )
                     if item['flags'].get('is-delayed-bounce'):
-                        original = (yield treq.json_content(
-                            (yield treq.get(
-                                eventsURL,
-                                auth=("api", secret),
-                                params={
-                                    "message-id": item['message']['headers']['message-id'],
-                                }))
-                        ))['items'][-1]
+                        if 'message' not in item:
+                            print("    delayed bounce with no associated message?", item["id"])
+                            continue
+                        messageId = item['message']['headers']['message-id']
+                        originalPage = (yield (yield treq.get(
+                            eventsURL,
+                            auth=("api", secret),
+                            params={"message-id": messageId}
+                        )).json())
+                        if not originalPage['items']:
+                            print("    no message found with ID", messageId)
+                            continue
+                        original = originalPage['items'][-1]
 
                         if 'storage' in original:
                             item['storage'] = original['storage']
