@@ -44,13 +44,11 @@ def getAllEvents(domain, secret):
     )
     pageURL = eventsURL
     while True:
-        thisPage = (yield treq.json_content(
-            (yield treq.get(pageURL, auth=("api", secret),
-                            params={
-                                "event": "failed",
-                                "severity": "permanent",
-                            }))
-        ))
+        thisPage = (yield (
+            yield treq.get(pageURL, auth=("api", secret), params={
+                "event": "failed", "severity": "permanent",
+            })
+        ).json())
         if not thisPage['items']:
             break
         for item in thisPage['items']:
@@ -178,9 +176,11 @@ def deliverOneBounce(secret, blob, domain, counter=itertools.count()):
     }
 
     if 'storage' in blob:
-        apiresponse = yield treq.get(blob['storage']['url'], auth=("api", secret),
-                                     headers={"accept": ["message/rfc2822"]})
-        msgobj = yield treq.json_content(apiresponse)
+        apiresponse = (
+            yield treq.get(blob['storage']['url'], auth=("api", secret),
+                           headers={"accept": ["message/rfc2822"]})
+        )
+        msgobj = yield apiresponse.json()
         if apiresponse.code == 200:
             original_bytes = msgobj['body-mime']
 
@@ -249,7 +249,7 @@ def deliverOneBounce(secret, blob, domain, counter=itertools.count()):
         }
     )
     print("bounce sent:", response.code)
-    print((yield treq.json_content(response)))
+    print((yield response.json()))
 
 def main(reactor, argv):
     from twisted.python.filepath import FilePath
