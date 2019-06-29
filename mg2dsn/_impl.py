@@ -54,14 +54,18 @@ def getAllEvents(domain, secret):
         if not thisPage['items']:
             break
         for item in thisPage['items']:
-            if ((item['flags'].get('is-authenticated') or
-                 item['flags'].get('is-delayed-bounce')
-                 # delayed bounces are (obviously) not authenticated.  has
-                 # mailgun already validated this bounce?  if not, we might
-                 # need to check to make sure the message ID originated from a
-                 # delayed bounce.
-            ) and
-                item['reason'] in ('bounce', 'suppress-bounce')):
+            if (
+                (
+                    item['flags'].get('is-authenticated') or
+                    item['flags'].get('is-delayed-bounce')
+                    # delayed bounces are (obviously) not authenticated.  has
+                    # mailgun already validated this bounce?  if not, we might
+                    # need to check to make sure the message ID originated from
+                    # a delayed bounce.
+                ) and (
+                    item['reason'] in ('bounce', 'suppress-bounce')
+                )
+            ):
                 bounced_at = pytz.utc.localize(
                     datetime.datetime.utcfromtimestamp(item['timestamp'])
                 )
@@ -74,30 +78,35 @@ def getAllEvents(domain, secret):
                 )
                 bounced = yield treq.get(bounce_uri, auth=("api", secret))
                 if bounced.code == 200:
-                    bouncedata = yield treq.json_content(bounced)
+                    bouncedata = yield bounced.json()
                     suppression_created = dateutil.parser.parse(
                         bouncedata.get('created_at')
                     )
+                    itemSufficient = True
                     if item['flags'].get('is-delayed-bounce'):
-                        if 'message' not in item:
+                        if 'message' in item:
+                            messageId = item['message']['headers']['message-id']
+                            originalPage = (yield (yield treq.get(
+                                eventsURL,
+                                auth=("api", secret),
+                                params={"message-id": messageId}
+                            )).json())
+                            if originalPage['items']:
+                                original = originalPage['items'][-1]
+
+                                if 'storage' in original:
+                                    item['storage'] = original['storage']
+                                    item['envelope'] = original['envelope']
+                            else:
+                                itemSufficient = False
+                                print("    no message found with ID", messageId)
+                        else:
+                            itemSufficient = False
                             print("    delayed bounce with no associated message?", item["id"])
-                            continue
-                        messageId = item['message']['headers']['message-id']
-                        originalPage = (yield (yield treq.get(
-                            eventsURL,
-                            auth=("api", secret),
-                            params={"message-id": messageId}
-                        )).json())
-                        if not originalPage['items']:
-                            print("    no message found with ID", messageId)
-                            continue
-                        original = originalPage['items'][-1]
-
-                        if 'storage' in original:
-                            item['storage'] = original['storage']
-                            item['envelope'] = original['envelope']
-
-                    yield writeone(secret, item, domain)
+                    if itemSufficient:
+                        yield deliverOneBounce(secret, item, domain)
+                    else:
+                        print("    item was insufficient; clearing but not sending.")
                     delta = abs(
                         (bounced_at - suppression_created).total_seconds()
                     )
@@ -110,13 +119,16 @@ def getAllEvents(domain, secret):
                               delta, 'reason:', item['reason'])
                 else:
                     # drain the response
-                    treq.content(bounced)
+                    bounced.content()
                     print("    no suppression; not sending bounce.")
         pageURL = thisPage['paging']['next']
 
 
 @inlineCallbacks
-def writeone(secret, blob, domain, counter=itertools.count()):
+def deliverOneBounce(secret, blob, domain, counter=itertools.count()):
+    """
+    Deliver one bounce.
+    """
     msg = MIMEMultipart("report", **{"report-type": "delivery-status"})
 
     if 'envelope' in blob:
