@@ -1,0 +1,16 @@
+[build-system]
+requires = ["flit"]
+build-backend = "flit.buildapi"
+
+[tool.flit.metadata]
+module = "mg2dsn"
+author = "Glyph"
+author-email = "glyph@twistedmatrix.com"
+home-page = "https://github.com/glyph/mg2dsn"
+classifiers = ["License :: OSI Approved :: MIT License", "Programming Language :: Python :: 3"]
+requires-python = ">=3"
+requires = ["attrs", "secretly", "treq", "twisted[tls]", "python-dateutil", "pytz"]
+
+
+[tool.flit.scripts]
+mg2dsn = "mg2dsn._impl:script"
