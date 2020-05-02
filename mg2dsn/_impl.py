@@ -25,7 +25,7 @@ from email.mime.text import MIMEText
 from email import message_from_string
 from email.message import Message
 from email.mime.nonmultipart import MIMEBase
-from email.utils import formatdate
+from email.utils import formatdate, format_datetime
 
 import treq
 from twisted.internet.defer import inlineCallbacks, succeed
@@ -47,6 +47,9 @@ def getAllEvents(domain, secret):
         thisPage = (yield (
             yield treq.get(pageURL, auth=("api", secret), params={
                 "event": "failed", "severity": "permanent",
+                "begin": format_datetime((datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=30))),
+                "ascending": "yes",
+                "limit": "100",
             })
         ).json())
         if not thisPage['items']:
