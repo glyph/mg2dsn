@@ -2,4 +2,4 @@
 Generate rfc6522 delivery status notifications from the Mailgun API.
 """
 
-__version__ = '0.4'
+__version__ = '0.5'
