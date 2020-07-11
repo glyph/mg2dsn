@@ -28,7 +28,7 @@ from email.mime.nonmultipart import MIMEBase
 from email.utils import formatdate, format_datetime
 
 import treq
-from twisted.internet.defer import inlineCallbacks, succeed
+from twisted.internet.defer import ensureDeferred, succeed
 from random import SystemRandom
 choice = SystemRandom().choice
 
@@ -37,17 +37,18 @@ class UnexpectedResponse(Exception):
     The response wasn't expected.
     """
 
-@inlineCallbacks
-def getAllEvents(domain, secret):
+async def getAllEvents(domain, secret):
     eventsURL = "https://api.mailgun.net/v3/{domain}/events".format(
         domain=domain
     )
     pageURL = eventsURL
+    timerange = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=30))
+    print("Scanning...", timerange)
     while True:
-        thisPage = (yield (
-            yield treq.get(pageURL, auth=("api", secret), params={
+        thisPage = (await (
+            await treq.get(pageURL, auth=("api", secret), params={
                 "event": "failed", "severity": "permanent",
-                "begin": format_datetime((datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=30))),
+                "begin": format_datetime(timerange),
                 "ascending": "yes",
                 "limit": "100",
             })
@@ -55,6 +56,8 @@ def getAllEvents(domain, secret):
         if not thisPage['items']:
             break
         for item in thisPage['items']:
+            print("Scanning...", format_datetime(datetime.datetime.fromtimestamp(item['timestamp'], datetime.timezone.utc)), item['reason'])
+            print("item", item)
             if (
                 (
                     item['flags'].get('is-authenticated') or
@@ -77,9 +80,9 @@ def getAllEvents(domain, secret):
                     .format(domain=domain,
                             recipient=item['recipient'].lower())
                 )
-                bounced = yield treq.get(bounce_uri, auth=("api", secret))
+                bounced = await treq.get(bounce_uri, auth=("api", secret))
                 if bounced.code == 200:
-                    bouncedata = yield bounced.json()
+                    bouncedata = await bounced.json()
                     suppression_created = dateutil.parser.parse(
                         bouncedata.get('created_at')
                     )
@@ -87,7 +90,7 @@ def getAllEvents(domain, secret):
                     if item['flags'].get('is-delayed-bounce'):
                         if 'message' in item:
                             messageId = item['message']['headers']['message-id']
-                            originalPage = (yield (yield treq.get(
+                            originalPage = (await (await treq.get(
                                 eventsURL,
                                 auth=("api", secret),
                                 params={"message-id": messageId}
@@ -105,7 +108,7 @@ def getAllEvents(domain, secret):
                             itemSufficient = False
                             print("    delayed bounce with no associated message?", item["id"])
                     if itemSufficient:
-                        yield deliverOneBounce(secret, item, domain)
+                        await deliverOneBounce(secret, item, domain)
                     else:
                         print("    item was insufficient; clearing but not sending.")
                     delta = abs(
@@ -114,7 +117,7 @@ def getAllEvents(domain, secret):
                     if item['reason'] == 'bounce':
                         print("    clearing (original) bounce created",
                               suppression_created, "with delta", delta)
-                        yield treq.delete(bounce_uri, auth=("api", secret))
+                        await treq.delete(bounce_uri, auth=("api", secret))
                     else:
                         print("    not clearing (suppression) bounce; delta:",
                               delta, 'reason:', item['reason'])
@@ -125,8 +128,7 @@ def getAllEvents(domain, secret):
         pageURL = thisPage['paging']['next']
 
 
-@inlineCallbacks
-def deliverOneBounce(secret, blob, domain, counter=itertools.count()):
+async def deliverOneBounce(secret, blob, domain, counter=itertools.count()):
     """
     Deliver one bounce.
     """
@@ -180,10 +182,10 @@ def deliverOneBounce(secret, blob, domain, counter=itertools.count()):
 
     if 'storage' in blob:
         apiresponse = (
-            yield treq.get(blob['storage']['url'], auth=("api", secret),
+            await treq.get(blob['storage']['url'], auth=("api", secret),
                            headers={"accept": ["message/rfc2822"]})
         )
-        msgobj = yield apiresponse.json()
+        msgobj = await apiresponse.json()
         if apiresponse.code == 200:
             original_bytes = msgobj['body-mime']
 
@@ -239,7 +241,7 @@ def deliverOneBounce(secret, blob, domain, counter=itertools.count()):
         ),
     )
 
-    response = yield treq.post(
+    response = await treq.post(
         "https://api.mailgun.net/v3/{domain}/messages.mime".format(
             domain=domain
         ),
@@ -252,7 +254,7 @@ def deliverOneBounce(secret, blob, domain, counter=itertools.count()):
         }
     )
     print("bounce sent:", response.code)
-    print((yield response.json()))
+    print((await response.json()))
 
 def main(reactor, argv):
     from twisted.python.filepath import FilePath
@@ -275,7 +277,7 @@ def main(reactor, argv):
     defaultsPath.setContent(json.dumps(dict(defaults, domain=namespace.domain),
                                        indent=2).encode())
     def action(secret):
-        return getAllEvents(namespace.domain, secret)
+        return ensureDeferred(getAllEvents(namespace.domain, secret))
     return secretly(reactor, action=action,
                     system='api.mailgun.net',
                     username=namespace.domain)
