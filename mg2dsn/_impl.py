@@ -57,7 +57,6 @@ async def getAllEvents(domain, secret):
             break
         for item in thisPage['items']:
             print("Scanning...", format_datetime(datetime.datetime.fromtimestamp(item['timestamp'], datetime.timezone.utc)), item['reason'])
-            print("item", item)
             if (
                 (
                     item['flags'].get('is-authenticated') or
@@ -89,6 +88,10 @@ async def getAllEvents(domain, secret):
                     itemSufficient = True
                     if item['flags'].get('is-delayed-bounce'):
                         if 'message' in item:
+                            if 'headers' not in item['message']:
+                                from pprint import pprint
+                                pprint(item)
+                                continue
                             messageId = item['message']['headers']['message-id']
                             originalPage = (await (await treq.get(
                                 eventsURL,
